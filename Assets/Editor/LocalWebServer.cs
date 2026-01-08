@@ -79,6 +79,16 @@ public static class LocalWebServer
             return;
         }
 
+        switch (req.Url.AbsolutePath)
+        {
+            case "/import/scene":
+                break;
+
+            case "/import/asset":
+                //AssetImportHandler.Handle(json);
+                break;
+        }
+
         res.StatusCode = 404;
         res.Close();
     }
