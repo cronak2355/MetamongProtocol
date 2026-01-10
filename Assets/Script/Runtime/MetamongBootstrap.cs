@@ -6,6 +6,14 @@ public class MetamongBootstrap
     static void Init()
     {
         Debug.Log("MetamongBootstrap Init called");
+        if (Object.FindAnyObjectByType<ImageLoader>() == null)
+        {
+            Debug.Log("ImageLoader");
+            GameObject il = new GameObject("ImageLoader");
+            il.AddComponent<ImageLoader>();
+            Object.DontDestroyOnLoad(il);
+        }
+
         // SceneImportManager
         if (Object.FindAnyObjectByType<SceneImportManager>() == null)
         {

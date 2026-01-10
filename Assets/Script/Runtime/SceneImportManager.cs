@@ -1,6 +1,7 @@
 ﻿using UnityEngine;
 using System.IO;
 using Newtonsoft.Json;
+using System.Collections.Generic;
 
 public class SceneImportManager : MonoBehaviour
 {
@@ -8,7 +9,10 @@ public class SceneImportManager : MonoBehaviour
     public string jsonFileName = "scene.json";
 
     [Header("Prefab Root Path")]
-    public string prefabPath = "Prefabs"; // Resources/Prefabs/
+    public string prefabPath = "Prefabs";
+
+    private SceneDTO currentScene;
+    private List<AssetDTO> assets;
 
     [ContextMenu("Load Scene From JSON")]
     public void SceneFromJson()
@@ -28,17 +32,28 @@ public class SceneImportManager : MonoBehaviour
         }
 
         string json = File.ReadAllText(path);
-        SceneDTO scene = JsonConvert.DeserializeObject<SceneDTO>(json);
 
-        if (scene == null)
+        // ✅ Game 단위로 역직렬화
+        GameDTO game = JsonConvert.DeserializeObject<GameDTO>(json);
+
+        if (game == null)
         {
-            Debug.LogError("[SceneImport] SceneDTO deserialize failed");
+            Debug.LogError("[SceneImport] GameDTO deserialize failed");
             return;
         }
 
-        Debug.Log($"[SceneImport] Load Scene: {scene.sceneId}");
+        currentScene = game.scenes.Find(s => s.sceneId == game.activeSceneId);
+        assets = game.assets;
 
-        foreach (var entity in scene.entities)
+        if (currentScene == null)
+        {
+            Debug.LogError("[SceneImport] Active scene not found");
+            return;
+        }
+
+        Debug.Log($"[SceneImport] Load Scene: {currentScene.sceneId}");
+
+        foreach (var entity in currentScene.entities)
         {
             CreateEntity(entity);
         }
@@ -47,34 +62,31 @@ public class SceneImportManager : MonoBehaviour
     void CreateEntity(EntityDTO entity)
     {
         GameObject go = new GameObject(entity.name);
+        go.transform.position = new Vector3(entity.x, entity.y, 0f);
 
-        // 1️⃣ 위치 설정 (JSON 좌표 그대로 사용)
-        Vector3 position = ConvertPosition(entity.x, entity.y);
-        go.transform.position = position;
+        var sr = go.AddComponent<SpriteRenderer>();
 
-        Debug.Log($"[SceneImport] Spawn Entity: {entity.id} at {position}");
-
-        // 2️⃣ 프리팹 로드 (id 기준)
-        if (!string.IsNullOrEmpty(entity.id))
+        //  Asset 매칭
+        AssetDTO asset = FindAssetForEntity(entity);
+        if (asset != null)
         {
-            GameObject prefab = Resources.Load<GameObject>($"{prefabPath}/{entity.id}");
-            if (prefab != null)
+            ImageLoader.Instance.LoadSprite(asset.url, sprite =>
             {
-                Instantiate(prefab, go.transform);
-            }
-            else
-            {
-                Debug.LogWarning($"[SceneImport] Prefab not found: {entity.id}");
-            }
+                sr.sprite = sprite;
+            });
+        }
+        else
+        {
+            Debug.LogWarning($"[SceneImport] Asset not found for entity: {entity.name}");
         }
 
-        // 3️⃣ 변수 컴포넌트
+        // 변수
         if (entity.variables != null && entity.variables.Count > 0)
         {
             CreateVariables(go, entity.variables);
         }
 
-        // 4️⃣ 이벤트 컴포넌트
+        // 이벤트
         if (entity.events != null && entity.events.Count > 0)
         {
             var events = go.AddComponent<RuntimeEvents>();
@@ -82,7 +94,14 @@ public class SceneImportManager : MonoBehaviour
         }
     }
 
-    void CreateVariables(GameObject go, System.Collections.Generic.List<VariableDTO> vars)
+    AssetDTO FindAssetForEntity(EntityDTO entity)
+    {
+        return assets.Find(a =>
+            a.name == entity.name
+        );
+    }
+
+    void CreateVariables(GameObject go, List<VariableDTO> vars)
     {
         var container = go.AddComponent<RuntimeVariables>();
 
@@ -94,11 +113,5 @@ public class SceneImportManager : MonoBehaviour
                 container.AddVariable(so);
             }
         }
-    }
-
-    Vector3 ConvertPosition(float x, float y)
-    {
-        // JSON 좌표를 Unity 월드 좌표로 그대로 사용
-        return new Vector3(x, y, 0f);
     }
 }

@@ -2,7 +2,8 @@
 public class AssetDTO
 {
     public string id;
+    public string tag;
     public string name;
     public string url;
-    public string tag;   // "sprite"
+    public int idx;
 }
