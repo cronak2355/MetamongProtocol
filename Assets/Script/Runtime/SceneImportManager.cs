@@ -33,7 +33,6 @@ public class SceneImportManager : MonoBehaviour
 
         string json = File.ReadAllText(path);
 
-        // ✅ Game 단위로 역직렬화
         GameDTO game = JsonConvert.DeserializeObject<GameDTO>(json);
 
         if (game == null)
@@ -61,29 +60,53 @@ public class SceneImportManager : MonoBehaviour
 
     void CreateEntity(EntityDTO entity)
     {
+        // 1. GameObject 생성
         GameObject go = new GameObject(entity.name);
         go.transform.position = new Vector3(entity.x, entity.y, 0f);
 
         var sr = go.AddComponent<SpriteRenderer>();
 
-        //  Asset 매칭
+        Debug.Log($"[CreateEntity] Created entity: {entity.name}");
+
+        // 2. Asset 찾기
         AssetDTO asset = FindAssetForEntity(entity);
-        if (asset != null)
+        if (asset == null)
         {
-            ImageLoader.Instance.LoadSprite(asset.url, sprite =>
+            Debug.LogWarning($"[CreateEntity] Asset not found for entity: {entity.name}");
+            return;
+        }
+
+        if (string.IsNullOrEmpty(asset.url))
+        {
+            Debug.LogWarning($"[CreateEntity] Asset url is empty: {entity.name}");
+            return;
+        }
+
+        var imageLoader = Object.FindObjectOfType<ImageLoader>();
+        if (imageLoader == null)
+        {
+            Debug.LogError("[CreateEntity] ImageLoader not found in scene");
+            return;
+        }
+
+        // 4. 이미지 로드
+        imageLoader.LoadSprite(asset.url, sprite =>
+        {
+            if (sprite == null)
             {
-                sr.sprite = sprite;
-            });
-        }
-        else
-        {
-            Debug.LogWarning($"[SceneImport] Asset not found for entity: {entity.name}");
-        }
+                Debug.LogError($"[CreateEntity] Sprite load failed: {asset.url}");
+                return;
+            }
+
+            sr.sprite = sprite;
+            Debug.Log($"[CreateEntity] Sprite applied: {entity.name}");
+        });
 
         // 변수
         if (entity.variables != null && entity.variables.Count > 0)
         {
             CreateVariables(go, entity.variables);
+            Debug.Log("변수창출");
         }
 
         // 이벤트

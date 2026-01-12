@@ -2,68 +2,86 @@ using UnityEngine;
 using UnityEngine.Networking;
 using System.Collections;
 using System.Collections.Generic;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public class ImageLoader : MonoBehaviour
 {
     public static ImageLoader Instance { get; private set; }
 
     private Dictionary<string, Sprite> spriteByUrl = new();
-    private Dictionary<string, bool> loadingUrls = new();
 
     private void Awake()
     {
-        if (Instance != null)
+        if (Instance != null && Instance != this)
         {
+#if UNITY_EDITOR
+            DestroyImmediate(gameObject);
+#else
             Destroy(gameObject);
+#endif
             return;
         }
 
         Instance = this;
-        DontDestroyOnLoad(gameObject);
     }
 
-    // ?? 외부에서 호출용
     public void LoadSprite(string url, System.Action<Sprite> onLoaded)
+    {
+#if UNITY_EDITOR
+        //  Editor에서는 동기 로딩
+        LoadSpriteEditor(url, onLoaded);
+#else
+        StartCoroutine(LoadSpriteCoroutine(url, onLoaded));
+#endif
+    }
+
+#if UNITY_EDITOR
+    void LoadSpriteEditor(string url, System.Action<Sprite> onLoaded)
     {
         if (string.IsNullOrEmpty(url))
         {
-            Debug.LogWarning("[ImageLoader] URL is null or empty");
             onLoaded?.Invoke(null);
             return;
         }
 
-        // 이미 캐시됨
-        if (spriteByUrl.TryGetValue(url, out var cached))
+        try
         {
-            onLoaded?.Invoke(cached);
-            return;
-        }
+            using var req = UnityWebRequestTexture.GetTexture(url);
+            var op = req.SendWebRequest();
 
-        // 이미 로딩 중
-        if (loadingUrls.ContainsKey(url))
+            while (!op.isDone) { } // Editor에서는 허용
+
+            if (req.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogError($"[ImageLoader][Editor] Load failed: {url}\n{req.error}");
+                onLoaded?.Invoke(null);
+                return;
+            }
+
+            var tex = DownloadHandlerTexture.GetContent(req);
+            var sprite = CreateSprite(tex);
+
+            spriteByUrl[url] = sprite;
+            onLoaded?.Invoke(sprite);
+        }
+        catch (System.Exception e)
         {
-            StartCoroutine(WaitForLoad(url, onLoaded));
-            return;
+            Debug.LogException(e);
+            onLoaded?.Invoke(null);
         }
-
-        StartCoroutine(LoadSpriteCoroutine(url, onLoaded));
     }
+#endif
 
     IEnumerator LoadSpriteCoroutine(string url, System.Action<Sprite> onLoaded)
     {
-        loadingUrls[url] = true;
-
         using var req = UnityWebRequestTexture.GetTexture(url);
         yield return req.SendWebRequest();
 
-        loadingUrls.Remove(url);
-
         if (req.result != UnityWebRequest.Result.Success)
         {
-            Debug.LogError($"[ImageLoader] Failed to load image: {url}\n{req.error}");
-            Debug.LogError($"[ImageLoader] Request Error: {req.error}");
-            Debug.LogError($"[ImageLoader] Response Code: {req.responseCode}");
-            Debug.LogError($"[ImageLoader] Response Text: {req.downloadHandler.text}");
+            Debug.LogError($"[ImageLoader] Load failed: {url}\n{req.error}");
             onLoaded?.Invoke(null);
             yield break;
         }
@@ -73,12 +91,6 @@ public class ImageLoader : MonoBehaviour
 
         spriteByUrl[url] = sprite;
         onLoaded?.Invoke(sprite);
-    }
-
-    IEnumerator WaitForLoad(string url, System.Action<Sprite> onLoaded)
-    {
-        yield return new WaitUntil(() => spriteByUrl.ContainsKey(url));
-        onLoaded?.Invoke(spriteByUrl[url]);
     }
 
     Sprite CreateSprite(Texture2D tex)
