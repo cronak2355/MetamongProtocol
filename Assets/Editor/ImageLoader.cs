@@ -1,62 +1,85 @@
 #if UNITY_EDITOR
 using UnityEngine;
 using UnityEngine.Networking;
+using Unity.EditorCoroutines.Editor;
 using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
+using System.Collections;
+using System.IO;
 
 public static class ImageLoader
 {
-    static readonly Dictionary<string, Sprite> spriteByUrl = new();
-
-    public static async void LoadSprite(string url, Action<Sprite> onLoaded)
+    public static void LoadSprite(string url, Action<Sprite> onLoaded)
     {
-        if (string.IsNullOrEmpty(url))
+        EditorCoroutineUtility.StartCoroutineOwnerless(Load(url, onLoaded));
+    }
+
+    static IEnumerator Load(string url, Action<Sprite> onLoaded)
+    {
+        using var req = UnityWebRequest.Get(url);
+        req.timeout = 15;
+        req.SetRequestHeader("User-Agent", "Mozilla/5.0");
+        req.SetRequestHeader("Accept", "*/*");
+        req.SetRequestHeader("Accept-Encoding", "identity");
+
+        yield return req.SendWebRequest();
+
+        if (req.result != UnityWebRequest.Result.Success)
         {
+            Debug.LogError("[ImageLoader] FAILED");
+            Debug.LogError(req.error);
             onLoaded?.Invoke(null);
-            return;
+            yield break;
         }
 
-        if (spriteByUrl.TryGetValue(url, out var cached))
+        string contentType = req.GetResponseHeader("Content-Type");
+        byte[] data = req.downloadHandler.data;
+
+        if (string.IsNullOrEmpty(contentType))
         {
-            onLoaded?.Invoke(cached);
-            return;
+            Debug.LogError("[ImageLoader] No Content-Type");
+            onLoaded?.Invoke(null);
+            yield break;
         }
 
-        try
+        // =========================
+        // WebP
+        // =========================
+        if (contentType.Contains("image/webp"))
         {
-            using var req = UnityWebRequestTexture.GetTexture(url);
-            req.SetRequestHeader("User-Agent", "Mozilla/5.0");
-            req.timeout = 10;
-
-            var op = req.SendWebRequest();
-
-            while (!op.isDone)
-                await Task.Delay(1);
-
-            if (req.result != UnityWebRequest.Result.Success)
+            Texture2D tex = WebPDecoder.Decode(data);
+            if (tex == null)
             {
-                Debug.LogError($"[ImageLoader] Load failed: {req.error}");
+                Debug.LogError("[ImageLoader] WebP Decode Failed");
                 onLoaded?.Invoke(null);
-                return;
+                yield break;
             }
 
-            var tex = DownloadHandlerTexture.GetContent(req);
-            var sprite = Sprite.Create(
-                tex,
-                new Rect(0, 0, tex.width, tex.height),
-                new Vector2(0.5f, 0.5f),
-                100f
-            );
+            onLoaded?.Invoke(CreateSprite(tex));
+            yield break;
+        }
 
-            spriteByUrl[url] = sprite;
-            onLoaded?.Invoke(sprite);
-        }
-        catch (Exception e)
+        // =========================
+        // PNG / JPG
+        // =========================
+        var tex2 = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+        if (!tex2.LoadImage(data))
         {
-            Debug.LogException(e);
+            Debug.LogError("[ImageLoader] LoadImage failed");
             onLoaded?.Invoke(null);
+            yield break;
         }
+
+        onLoaded?.Invoke(CreateSprite(tex2));
+    }
+
+    static Sprite CreateSprite(Texture2D tex)
+    {
+        return Sprite.Create(
+            tex,
+            new Rect(0, 0, tex.width, tex.height),
+            new Vector2(0.5f, 0.5f),
+            100f
+        );
     }
 }
 #endif
